@@ -1,0 +1,24 @@
+{
+  "name": "tezos-swap-pool",
+  "version": "1.0.0",
+  "description": "Smart contract protocol to facilitate swapping of tezos with other cryptos like bitcoin and ethereum.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "contract": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EjaraApp/tezos-swap-pool.git"
+  },
+  "author": "Ejara",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/EjaraApp/tezos-swap-pool/issues"
+  },
+  "homepage": "https://github.com/EjaraApp/tezos-swap-pool#readme",
+  "dependencies": {
+    "@taquito/taquito": "^7.0.1-beta.0",
+    "yargs": "^16.1.1"
+  }
+}
