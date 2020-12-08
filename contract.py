@@ -3,7 +3,7 @@ import smartpy as sp
 
 class SwapPool(sp.Contract):
 
-    def __init__(self, oracles, admin, spare, min_lock, cryptos_symbols):
+    def __init__(self, oracles, admin, spare, min_lock, cryptos_symbols, timelocks):
 
         open_pool_data = {
             'cryptos': sp.TMap(sp.TString, sp.TString),
@@ -13,7 +13,7 @@ class SwapPool(sp.Contract):
             'dips': sp.TList(sp.TRecord(**{'swap': sp.TString, 'amount': sp.TMutez}))
         }
 
-        closed_pool_data = {
+        swap_pool_data = {
             'address': sp.TAddress,
             'amount': sp.TMutez,
             'crypto': sp.TString,
@@ -29,8 +29,9 @@ class SwapPool(sp.Contract):
             oracles = oracles,
             accepted_cryptos = cryptos_symbols,
             min_lock = min_lock,
+            timelocks = timelocks,
             open_pool = sp.map(tkey=sp.TString, tvalue=sp.TRecord(**open_pool_data)),
-            swap_pool = sp.big_map(tkey=sp.TString, tvalue=sp.TRecord(**closed_pool_data)),
+            swap_pool = sp.big_map(tkey=sp.TString, tvalue=sp.TRecord(**swap_pool_data)),
             closed_pool = sp.big_map()
             )
 
@@ -42,6 +43,10 @@ class SwapPool(sp.Contract):
 
     def assert_spare(self):
         sp.verify_equal(self.data.spare, sp.sender, 'Invalid Spare!')
+    
+    def assert_crypto(self, cryptos):
+        sp.for crypto in cryptos:
+            sp.verify(self.data.accepted_cryptos.contains(crypto), 'Invalid Crypto!')
     
     @sp.entry_point
     def change_admin(self, params):
@@ -64,15 +69,40 @@ class SwapPool(sp.Contract):
                 del self.data.oracles[oracle]
 
     @sp.entry_point
-    def request_tezos_exchange(self, params):
+    def request_tezos_exchange(self, cryptos, amount, key):
         # adds exchange request to the tezos open pool
-        pass
+        
+        self.assert_crypto(cryptos.keys())
+        
+        sp.verify(~self.data.open_pool.contains(key), 'Key Exists!')
+        
+        self.data.open_pool[key] = sp.record(
+            cryptos = cryptos,
+            amount = amount,
+            timestamp = sp.now,
+            timelock = sp.now.add_days(self.data.min_lock),
+            dips = sp.list()
+        )
+        
     
     @sp.entry_point
-    def request_tezos_swap(self, params):
+    def request_tezos_swap(self, address, amount, crypto, key):
         # adds a swap request to the swap pool
         # it allocates available tezos from the open pool
-        pass
+        
+        self.assert_crypto([crypto])
+        
+        sp.verify(~self.data.swap_pool.contains(key), 'Key Exists!')
+        
+        self.data.swap_pool[key] = sp.record(
+            address = address,
+            crypto = crypto,
+            amount = amount,
+            timestamp = sp.now,
+            timelock = sp.now.add_minutes(self.data.timelocks[crypto]),
+            swaps = sp.list(),
+            swapped = False
+        )
     
     @sp.entry_point
     def update_pool(self, params):
@@ -101,10 +131,41 @@ def test():
         btc.address: 'Ejara Bitcoin Oracle'
     }
     
-    cryptos_symbols = ['BTC', 'ETH']
+    cryptos_symbols = {'BTC': 'Bitcoin', 'ETH': 'Ethereum'}
     
     min_lock = 1
     
-    c = SwapPool(oracles, admin.address, spare.address, min_lock, cryptos_symbols)
+    timelocks = {
+        'BTC': 60,
+        'ETH': 30
+    }
+    
+    c = SwapPool(oracles, admin.address, spare.address, min_lock, cryptos_symbols, timelocks)
     
     sc += c
+    
+    exchanger = sp.test_account('List tezos on exchange')
+    
+    open_pool_request = {
+        'cryptos': {'BTC': '1Kf9gGLaCh8A6aNeg8a5Ewb7eEm63u8yYZ'},
+        'amount': sp.tez(13),
+    }
+    
+    sc += c.request_tezos_exchange(
+        cryptos = open_pool_request['cryptos'],
+        amount = open_pool_request['amount'],
+        key = 'asdf')
+    
+    swap_pool_request = {
+            'address': exchanger.address,
+            'amount': sp.tez(9),
+            'crypto': 'BTC',
+        }
+    
+    sc += c.request_tezos_swap(
+        address = swap_pool_request['address'],
+        amount = swap_pool_request['amount'],
+        crypto = swap_pool_request['crypto'],
+        key = 'jkl')
+    
+    
