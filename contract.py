@@ -10,7 +10,7 @@ class SwapPool(sp.Contract):
             'amount': sp.TMutez,
             'timestamp': sp.TTimestamp,
             'timelock': sp.TTimestamp,
-            'dips': sp.TList(sp.TRecord(**{'swap': sp.TString, 'amount': sp.TMutez}))
+            'dips': sp.TMap(sp.TNat, sp.TMutez)
         }
 
         swap_pool_data = {
@@ -19,7 +19,7 @@ class SwapPool(sp.Contract):
             'crypto': sp.TString,
             'timestamp': sp.TTimestamp,
             'timelock': sp.TTimestamp,
-            'swaps': sp.TList(sp.TString),
+            'swaps': sp.TList(sp.TNat),
             'swapped': sp.TBool
         }
 
@@ -30,10 +30,12 @@ class SwapPool(sp.Contract):
             accepted_cryptos = cryptos_symbols,
             min_lock = min_lock,
             timelocks = timelocks,
-            open_pool = sp.map(tkey=sp.TString, tvalue=sp.TRecord(**open_pool_data)),
-            swap_pool = sp.big_map(tkey=sp.TString, tvalue=sp.TRecord(**swap_pool_data)),
-            closed_pool = sp.big_map()
-            )
+            pool_counter=sp.nat(0),
+            swap_counter=sp.nat(0),
+            open_pool = sp.map(tkey=sp.TNat, tvalue=sp.TRecord(**open_pool_data)),
+            swap_pool = sp.big_map(tkey=sp.TNat, tvalue=sp.TRecord(**swap_pool_data)),
+            closed_pool = sp.big_map(tkey=sp.TNat, tvalue=sp.TRecord(**open_pool_data))
+        )
 
     def assert_oracle(self):
         sp.verify(self.data.oracles.contains(sp.sender), 'Invalid Oracle!')
@@ -69,40 +71,68 @@ class SwapPool(sp.Contract):
                 del self.data.oracles[oracle]
 
     @sp.entry_point
-    def request_tezos_exchange(self, cryptos, amount, key):
+    def add_pool(self, cryptos, amount):
         # adds exchange request to the tezos open pool
         
         self.assert_crypto(cryptos.keys())
         
-        sp.verify(~self.data.open_pool.contains(key), 'Key Exists!')
-        
-        self.data.open_pool[key] = sp.record(
+        self.data.open_pool[self.data.pool_counter] = sp.record(
             cryptos = cryptos,
             amount = amount,
             timestamp = sp.now,
             timelock = sp.now.add_days(self.data.min_lock),
-            dips = sp.list()
+            dips = sp.map()
         )
+        
+        self.data.pool_counter = self.data.pool_counter + sp.nat(1)
         
     
     @sp.entry_point
-    def request_tezos_swap(self, address, amount, crypto, key):
+    def dip_pool(self, address, amount, crypto):
         # adds a swap request to the swap pool
         # it allocates available tezos from the open pool
-        
+
         self.assert_crypto([crypto])
+
+        y = sp.local('y', sp.map())
+        s = sp.local('s', amount)
+
+        # TODO: How to break out of this loop
+        sp.for k in self.data.open_pool.keys():
+
+            sp.if self.data.open_pool[k].cryptos.contains(crypto):
+                # compte how much kTH pool request can provide (x)
+                x = sp.local('x', self.data.open_pool[k].amount)
+                sp.for j in self.data.open_pool[k].dips.keys():
+                    sp.if self.data.swap_pool[j].timelock > sp.now:
+                        x.value = x.value - self.data.open_pool[k].dips[j]
+
+                sp.if x.value > sp.mutez(0):
+                    sp.if s.value > sp.mutez(0):
+                        sp.if x.value <= s.value:
+                            y.value[k] = x.value
+                        sp.else:
+                            y.value[k] = s.value
+                        s.value = s.value - x.value
+
+                # need to break out of loop when s.value <= sp.mutez(0):
+
+        sp.verify(s.value <= sp.mutez(0), 'Could not satify exchange request!')
         
-        sp.verify(~self.data.swap_pool.contains(key), 'Key Exists!')
+        sp.for t in y.value.keys():
+            self.data.open_pool[t].dips[self.data.swap_counter] = y.value[t]
         
-        self.data.swap_pool[key] = sp.record(
+        self.data.swap_pool[self.data.swap_counter] = sp.record(
             address = address,
             crypto = crypto,
             amount = amount,
             timestamp = sp.now,
             timelock = sp.now.add_minutes(self.data.timelocks[crypto]),
-            swaps = sp.list(),
+            swaps = y.value.keys(),
             swapped = False
         )
+        
+        self.data.swap_counter = self.data.swap_counter + sp.nat(1)
     
     @sp.entry_point
     def update_pool(self, params):
@@ -112,7 +142,7 @@ class SwapPool(sp.Contract):
         self.assert_oracle()
     
     @sp.entry_point
-    def clean_pool(self, params):
+    def trim_pool(self, params):
         # Remove all completed items from open to closed pool
         # an item is comleted if timelock is up and no pending exchanges on it
         # or if amount available for exchange has been exhausted
@@ -148,24 +178,43 @@ def test():
     
     open_pool_request = {
         'cryptos': {'BTC': '1Kf9gGLaCh8A6aNeg8a5Ewb7eEm63u8yYZ'},
-        'amount': sp.tez(13),
+        'amount': sp.mutez(13*1000000),
     }
     
-    sc += c.request_tezos_exchange(
+    sc += c.add_pool(
         cryptos = open_pool_request['cryptos'],
         amount = open_pool_request['amount'],
-        key = 'asdf')
+    )
+    
+    sc += c.add_pool(
+        cryptos = open_pool_request['cryptos'],
+        amount = open_pool_request['amount'],
+    )
     
     swap_pool_request = {
-            'address': exchanger.address,
-            'amount': sp.tez(9),
-            'crypto': 'BTC',
-        }
+        'address': exchanger.address,
+        'amount': sp.mutez(19*1000000),
+        'crypto': 'BTC',
+    }
     
-    sc += c.request_tezos_swap(
+    sc += c.dip_pool(
         address = swap_pool_request['address'],
         amount = swap_pool_request['amount'],
         crypto = swap_pool_request['crypto'],
-        key = 'jkl')
+    )
+    
+    sc += c.dip_pool(
+        address = swap_pool_request['address'],
+        amount = sp.mutez(7000000), #swap_pool_request['amount'],
+        crypto = swap_pool_request['crypto'],
+    )
+    
+    sc.h2('Dip should fail!')
+    
+    sc += c.dip_pool(
+        address = swap_pool_request['address'],
+        amount = sp.mutez(7000000), #swap_pool_request['amount'],
+        crypto = swap_pool_request['crypto'],
+    ).run(valid=False)
     
     
