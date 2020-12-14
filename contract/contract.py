@@ -10,17 +10,19 @@ class SwapPool(sp.Contract):
             'amount': sp.TMutez,
             'timestamp': sp.TTimestamp,
             'timelock': sp.TTimestamp,
-            'dips': sp.TMap(sp.TNat, sp.TMutez)
+            'dips': sp.TMap(sp.TNat, sp.TRecord(amount = sp.TMutez, sent = sp.TBool))
         }
 
         swap_pool_data = {
             'address': sp.TAddress,
             'amount': sp.TMutez,
             'crypto': sp.TString,
+            'rate': sp.TMutez,
             'timestamp': sp.TTimestamp,
             'timelock': sp.TTimestamp,
             'swaps': sp.TList(sp.TNat),
-            'swapped': sp.TBool
+            'swapped': sp.TBool,
+            'settled': sp.TMutez
         }
 
         self.init(
@@ -71,14 +73,16 @@ class SwapPool(sp.Contract):
                 del self.data.oracles[oracle]
 
     @sp.entry_point
-    def add_pool(self, cryptos, amount):
+    def add_pool(self, cryptos):
         # adds exchange request to the tezos open pool
+        
+        sp.verify(sp.amount > sp.tez(1), 'A minimum of 1 XTZ!')
         
         self.assert_crypto(cryptos.keys())
         
         self.data.open_pool[self.data.pool_counter] = sp.record(
             cryptos = cryptos,
-            amount = amount,
+            amount = sp.amount,
             timestamp = sp.now,
             timelock = sp.now.add_days(self.data.min_lock),
             dips = sp.map()
@@ -88,7 +92,7 @@ class SwapPool(sp.Contract):
         
     
     @sp.entry_point
-    def dip_pool(self, address, amount, crypto):
+    def dip_pool(self, address, amount, crypto, rate):
         # adds a swap request to the swap pool
         # it allocates available tezos from the open pool
 
@@ -104,8 +108,8 @@ class SwapPool(sp.Contract):
                 # compte how much kTH pool request can provide (x)
                 x = sp.local('x', self.data.open_pool[k].amount)
                 sp.for j in self.data.open_pool[k].dips.keys():
-                    sp.if self.data.swap_pool[j].timelock > sp.now:
-                        x.value = x.value - self.data.open_pool[k].dips[j]
+                    sp.if (self.data.swap_pool[j].timelock > sp.now) | self.data.swap_pool[j].swapped:
+                        x.value = x.value - self.data.open_pool[k].dips[j].amount
 
                 sp.if x.value > sp.mutez(0):
                     sp.if s.value > sp.mutez(0):
@@ -120,26 +124,44 @@ class SwapPool(sp.Contract):
         sp.verify(s.value <= sp.mutez(0), 'Could not satify exchange request!')
         
         sp.for t in y.value.keys():
-            self.data.open_pool[t].dips[self.data.swap_counter] = y.value[t]
+            self.data.open_pool[t].dips[self.data.swap_counter] = sp.record(amount = y.value[t], sent = False)
         
         self.data.swap_pool[self.data.swap_counter] = sp.record(
             address = address,
             crypto = crypto,
             amount = amount,
+            rate = rate,
             timestamp = sp.now,
             timelock = sp.now.add_minutes(self.data.timelocks[crypto]),
             swaps = y.value.keys(),
-            swapped = False
+            swapped = False,
+            settled = sp.mutez(0)
         )
         
         self.data.swap_counter = self.data.swap_counter + sp.nat(1)
     
     @sp.entry_point
-    def update_pool(self, params):
+    def update_pool(self, updates):
         # oracle calls this endpoint to notify smart contract
         # of the status of chain transfers
         # tezos is transfered to off chain party's tezos account if oracle confirms
         self.assert_oracle()
+        
+        sp.for update in updates:
+            sp.if (update['is_sent'] == 1) & ~self.data.open_pool[update['open_key']].dips[update['swap_key']].sent:
+                sp.send(
+                    self.data.swap_pool[update['swap_key']].address,
+                    self.data.open_pool[update['open_key']].dips[update['swap_key']].amount,
+                )
+                
+                self.data.swap_pool[update['swap_key']].settled = self.data.swap_pool[update['swap_key']].settled + self.data.open_pool[update['open_key']].dips[update['swap_key']].amount
+                
+                self.data.open_pool[update['open_key']].dips[update['swap_key']].sent = True
+                
+                sp.if self.data.swap_pool[update['swap_key']].settled == self.data.swap_pool[update['swap_key']].amount:
+                    self.data.swap_pool[update['swap_key']].swapped = True
+                
+                
     
     @sp.entry_point
     def trim_pool(self, params):
@@ -156,7 +178,7 @@ def test():
     btc = sp.test_account('Ejara Bitcoin Oracle')
     admin = sp.test_account('Ejara Admin')
     spare = sp.test_account('Ejara Spare')
-    
+
     oracles = {
         btc.address: 'Ejara Bitcoin Oracle'
     }
@@ -172,41 +194,50 @@ def test():
     
     c = SwapPool(oracles, admin.address, spare.address, min_lock, cryptos_symbols, timelocks)
     
+    # c.set_initial_balance(sp.tez(100))
+    
     sc += c
     
-    exchanger = sp.test_account('List tezos on exchange')
+    xchngr = sp.test_account('List tezos on exchange')
+    
+    sc.h2('Add Pool Request!')
     
     open_pool_request = {
-        'cryptos': {'BTC': '1Kf9gGLaCh8A6aNeg8a5Ewb7eEm63u8yYZ'},
+        'cryptos': {'BTC': '1Kf9gGLaCh8A6aNeg8a5Ewb7eEm63u8yYZ', 'ETH': '0x2028aa76C84802cd61Ab3BeC4f142ca33743068b'},
         'amount': sp.mutez(13*1000000),
     }
     
     sc += c.add_pool(
-        cryptos = open_pool_request['cryptos'],
-        amount = open_pool_request['amount'],
-    )
+        open_pool_request['cryptos'],
+    ).run(sender=xchngr.address, amount=sp.tez(13))
     
     sc += c.add_pool(
-        cryptos = open_pool_request['cryptos'],
-        amount = open_pool_request['amount'],
-    )
+        open_pool_request['cryptos'],
+    ).run(sender=xchngr.address, amount=sp.tez(13))
+    
+    sc.h2('Dip Pool Request!')
+    
+    offchainer = sp.test_account('Change my coin for tezos')
     
     swap_pool_request = {
-        'address': exchanger.address,
-        'amount': sp.mutez(19*1000000),
+        'address': offchainer.address,
+        'amount': sp.tez(19),
         'crypto': 'BTC',
+        'rate': sp.mutez(8600630000)
     }
     
     sc += c.dip_pool(
         address = swap_pool_request['address'],
         amount = swap_pool_request['amount'],
         crypto = swap_pool_request['crypto'],
+        rate = swap_pool_request['rate'],
     )
     
     sc += c.dip_pool(
         address = swap_pool_request['address'],
-        amount = sp.mutez(7000000), #swap_pool_request['amount'],
+        amount = sp.tez(7), #swap_pool_request['amount'],
         crypto = swap_pool_request['crypto'],
+        rate = swap_pool_request['rate'],
     )
     
     sc.h2('Dip should fail!')
@@ -215,6 +246,80 @@ def test():
         address = swap_pool_request['address'],
         amount = sp.mutez(7000000), #swap_pool_request['amount'],
         crypto = swap_pool_request['crypto'],
+        rate = swap_pool_request['rate'],
     ).run(valid=False)
     
+    sc.h2('Update Pool Request!')
     
+    update_pool_data = [
+        {
+            'open_key': 0,
+            'swap_key': 0,
+            'is_sent': 1,
+        },
+        {
+            'open_key': 1,
+            'swap_key': 0,
+            'is_sent': 0,
+        },
+        {
+            'open_key': 1,
+            'swap_key': 1,
+            'is_sent': 1,
+        },
+    ]
+    
+    sc += c.update_pool(update_pool_data).run(sender =  btc.address)
+    
+    update_pool_data1 = [
+        {
+            'open_key': 1,
+            'swap_key': 0,
+            'is_sent': 1,
+        }
+    ]
+    
+    sc += c.update_pool(update_pool_data1).run(sender =  btc.address)
+    
+    
+    
+    
+    
+@sp.add_test(name = "Swap Pool Init")
+def test():
+    sc = sp.test_scenario()
+    
+    btc = sp.address('tz1d1sJVHi4vmD45CMVUtsm5itnQiNRULTuq')
+    eth = sp.address('tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC')
+    admin = sp.address('tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC')
+    spare = sp.address('tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC')
+
+    oracles = {
+        btc: 'Ejara Bitcoin Oracle',
+        eth: 'Ejara Ethereum Oracle'
+    }
+    
+    cryptos_symbols = {'BTC': 'Bitcoin', 'ETH': 'Ethereum'}
+    
+    min_lock = 1
+    
+    timelocks = {
+        'BTC': 60,
+        'ETH': 30
+    }
+    
+    c = SwapPool(oracles, admin, spare, min_lock, cryptos_symbols, timelocks)
+    
+    # c.set_initial_balance(sp.tez(100))
+    
+    sc += c
+    
+    update_pool_data1 = [
+        {
+            'open_key': 1,
+            'swap_key': 0,
+            'is_sent': 1,
+        }
+    ]
+    
+    sc += c.update_pool(update_pool_data1).run(sender =  btc, valid= False)

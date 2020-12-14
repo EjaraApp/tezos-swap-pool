@@ -1,0 +1,43 @@
+{
+    "prim": "Pair",
+    "args": [
+      {
+        "prim": "Pair",
+        "args": [
+          {
+            "prim": "Pair",
+            "args": [
+              [ { "prim": "Elt", "args": [ { "string": "BTC" }, { "string": "Bitcoin" } ] }, { "prim": "Elt", "args": [ { "string": "ETH" }, { "string": "Ethereum" } ] } ],
+              { "string": "tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC" }
+            ]
+          },
+          { "prim": "Pair", "args": [ [], { "prim": "Pair", "args": [ { "int": "1" }, [] ] } ] }
+        ]
+      },
+      {
+        "prim": "Pair",
+        "args": [
+          {
+            "prim": "Pair",
+            "args": [
+              [
+                { "prim": "Elt", "args": [ { "string": "tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC" }, { "string": "Ejara Ethereum Oracle" } ] },
+                { "prim": "Elt", "args": [ { "string": "tz1d1sJVHi4vmD45CMVUtsm5itnQiNRULTuq" }, { "string": "Ejara Bitcoin Oracle" } ] }
+              ],
+              { "prim": "Pair", "args": [ { "int": "0" }, { "string": "tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC" } ] }
+            ]
+          },
+          {
+            "prim": "Pair",
+            "args": [
+              { "int": "0" },
+              {
+                "prim": "Pair",
+                "args": [ [], [ { "prim": "Elt", "args": [ { "string": "BTC" }, { "int": "60" } ] }, { "prim": "Elt", "args": [ { "string": "ETH" }, { "int": "30" } ] } ] ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }

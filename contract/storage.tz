@@ -1,0 +1,1 @@
+(Pair (Pair (Pair {Elt "BTC" "Bitcoin"; Elt "ETH" "Ethereum"} "tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC") (Pair {} (Pair 1 {}))) (Pair (Pair {Elt "tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC" "Ejara Ethereum Oracle"; Elt "tz1d1sJVHi4vmD45CMVUtsm5itnQiNRULTuq" "Ejara Bitcoin Oracle"} (Pair 0 "tz1UprVhwoHVrKodvFKcBBvqvsMiNB8HUyGC")) (Pair 0 (Pair {} {Elt "BTC" 60; Elt "ETH" 30}))))
