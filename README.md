@@ -63,8 +63,8 @@ def trim_pool(self):
 ## TODO
 - [x]  Complete Smart Contract (initial version)
 - [x]  Deploy to Testnet.
-- [ ]  Bitcoin Oracle. [Dec 18]
-- [ ]  Ethereum Oracle. [Dec 25]
-- [ ]  Run a Full Testnet Test. [Dec 31]
-- [ ]  Short client script to interact with contract (mainly for mobile app integration) [Jan 8]
-- [ ]  Mobile app V2 integration. [Jan 15]
+- [ ]  Bitcoin Oracle. [Dec 08]
+- [ ]  Ethereum Oracle. [Dec 08]
+- [ ]  Run a Full Testnet Test. [Dec 15]
+- [ ]  Short client script to interact with contract (mainly for mobile app integration) [Jan 22]
+- [ ]  Mobile app V2 integration. [Jan 29]
